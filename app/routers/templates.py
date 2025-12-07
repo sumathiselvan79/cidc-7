@@ -153,3 +153,57 @@ def update_mapping(
     db.commit()
     db.refresh(template)
     return template
+
+@router.get("/{template_id}/diagnose")
+def diagnose_pdf_fields(template_id: int, db: Session = Depends(get_db)):
+    """
+    Diagnostic endpoint to inspect PDF form fields.
+    Returns detailed information about all fields in the PDF.
+    """
+    template = db.query(models.Template).filter(models.Template.id == template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    
+    if not os.path.exists(template.file_path):
+        raise HTTPException(status_code=500, detail="Template PDF file not found")
+    
+    try:
+        import fitz
+        doc = fitz.open(template.file_path)
+        
+        diagnostic_info = {
+            "template_id": template_id,
+            "template_name": template.template_name,
+            "file_path": template.file_path,
+            "total_pages": len(doc),
+            "fields": []
+        }
+        
+        for page_num, page in enumerate(doc):
+            widgets = page.widgets()
+            if widgets:
+                for widget in widgets:
+                    field_info = {
+                        "page": page_num + 1,
+                        "field_name": widget.field_name,
+                        "field_type": widget.field_type,
+                        "field_type_string": widget.field_type_string,
+                        "current_value": widget.field_value,
+                        "text_color": widget.text_color,
+                        "text_fontsize": widget.text_fontsize,
+                        "border_color": widget.border_color,
+                        "fill_color": widget.fill_color,
+                    }
+                    diagnostic_info["fields"].append(field_info)
+        
+        doc.close()
+        
+        diagnostic_info["total_fields"] = len(diagnostic_info["fields"])
+        return diagnostic_info
+        
+    except Exception as e:
+        import traceback
+        print(f"✗ Error diagnosing PDF: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error diagnosing PDF: {str(e)}")
+
